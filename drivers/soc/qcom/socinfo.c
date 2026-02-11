@@ -64,6 +64,7 @@ enum {
 	HW_PLATFORM_IDP = 34,
 	HW_PLATFORM_CRD = 40,
 	HW_PLATFORM_WDP = 36,
+	HW_PLATFORM_EVK = 47,
 	HW_PLATFORM_INVALID
 };
 
@@ -91,6 +92,7 @@ static const char * const hw_platform[] = {
 	[HW_PLATFORM_IDP] = "IDP",
 	[HW_PLATFORM_CRD] = "CRD",
 	[HW_PLATFORM_WDP] = "WDP",
+	[HW_PLATFORM_EVK] = "EVK",
 };
 
 enum {
