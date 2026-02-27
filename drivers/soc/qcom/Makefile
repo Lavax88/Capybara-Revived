@@ -72,6 +72,7 @@ obj-$(CONFIG_QCOM_ICC_BWMON)	+= icc-bwmon.o
 qcom_ice-objs			+= ice.o
 obj-$(CONFIG_QCOM_INLINE_CRYPTO_ENGINE)	+= qcom_ice.o
 obj-$(CONFIG_QTI_HW_KEY_MANAGER_V1) += hwkm.o
+obj-$(CONFIG_QTI_CRYPTO_FDE)+= crypto-qti-common.o
 obj-$(CONFIG_QCOM_PBS) +=	qcom-pbs.o
 obj-$(CONFIG_QCOM_DCVS)	+= dcvs/
 obj-$(CONFIG_QTI_MPAM)	+= mpam/
