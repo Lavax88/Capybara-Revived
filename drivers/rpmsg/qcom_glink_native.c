@@ -2538,6 +2538,8 @@ static void qcom_glink_rx_close_ack(struct qcom_glink *glink, unsigned int lcid)
 		spin_lock_irqsave(&glink->idr_lock, flags);
 		idr_remove(&glink->lcids, channel->lcid);
 		channel->lcid = 0;
+		idr_remove(&glink->rcids, channel->rcid);
+		channel->rcid = 0;
 		spin_unlock_irqrestore(&glink->idr_lock, flags);
 		CH_INFO(channel, "Channel fully closed, lcid cleared\n");
 	} else {
