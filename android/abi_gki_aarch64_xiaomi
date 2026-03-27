@@ -223,6 +223,14 @@
   elv_rqhash_add
   blk_req_needs_zone_write_lock
   __blk_req_zone_write_lock
+  blkcg_print_blkgs
+  blkg_conf_init
+  blkg_conf_prep
+  blkg_conf_exit
+  __blkg_prfill_u64
+  blkcg_root
+  blkcg_activate_policy
+  blkcg_deactivate_policy
 
 #required by cifs.ko
   add_swap_extent
@@ -512,6 +520,17 @@ __traceiter_android_vh_alloc_flags_cma_adjust
 # required by xr-qi.ko
 __tracepoint_android_vh_futex_wait_queue_start
 __traceiter_android_vh_futex_wait_queue_start
+
+__traceiter_android_vh_remove_mapping
+__traceiter_android_vh_remove_mapping_failed
+__traceiter_android_vh_filemap_get_folio_end
+__traceiter_android_vh_do_new_mount_fc
+__traceiter_android_vh_put_super
+__tracepoint_android_vh_remove_mapping
+__tracepoint_android_vh_remove_mapping_failed
+__tracepoint_android_vh_filemap_get_folio_end
+__tracepoint_android_vh_do_new_mount_fc
+__tracepoint_android_vh_put_super
 
 # required by zsmalloc.ko
 __traceiter_android_vh_zs_shrinker_adjust
