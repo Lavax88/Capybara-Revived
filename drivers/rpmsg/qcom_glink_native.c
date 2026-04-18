@@ -2542,6 +2542,7 @@ static void qcom_glink_rx_close_ack(struct qcom_glink *glink, unsigned int lcid)
 		channel->rcid = 0;
 		spin_unlock_irqrestore(&glink->idr_lock, flags);
 		CH_INFO(channel, "Channel fully closed, lcid cleared\n");
+		kref_put(&channel->refcount, qcom_glink_channel_release);
 	} else {
 		CH_INFO(channel, "Channel not fully closed yet, keeping lcid=%d\n", channel->lcid);
 	}
@@ -2549,8 +2550,6 @@ static void qcom_glink_rx_close_ack(struct qcom_glink *glink, unsigned int lcid)
 	/* Reinit any variables that are important to endpoint creation */
 	reinit_completion(&channel->open_ack);
 	channel->channel_ready = false;
-
-	kref_put(&channel->refcount, qcom_glink_channel_release);
 }
 
 static void qcom_glink_work(struct work_struct *work)
