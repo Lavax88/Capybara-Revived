@@ -25,10 +25,11 @@ if [ -z "$BUILD_RESUKISU" ]; then
     esac
 fi
 
-# If non-root is selected, skip SUSFS entirely
+# If non-root is selected, skip SUSFS & NoMount entirely
 if [ "$BUILD_RESUKISU" != "y" ]; then
     BUILD_SUSFS=n
     BUILD_SUSFS_SPOOF_UNAME=n
+    BUILD_NOMOUNT=n
 else
     # Prompt for SUSFS if not set
     if [ -z "$BUILD_SUSFS" ]; then
@@ -52,6 +53,19 @@ else
                 ;;
             *)
                 BUILD_SUSFS_SPOOF_UNAME=n
+                ;;
+        esac
+    fi
+
+    # Prompt for NoMount if not set
+    if [ -z "$BUILD_NOMOUNT" ]; then
+        read -p "Build with NoMount support? [y/N]: " nomount_choice
+        case "$nomount_choice" in
+            [yY][eE][sS]|[yY])
+                BUILD_NOMOUNT=y
+                ;;
+            *)
+                BUILD_NOMOUNT=n
                 ;;
         esac
     fi
@@ -187,11 +201,36 @@ if [ "$BUILD_RESUKISU" = "y" ]; then
         echo "CONFIG_KSU_SUSFS=n" >> "$OUT_DIR/.config"
     fi
 
+    if [ "$BUILD_NOMOUNT" = "y" ]; then
+        echo "Fetching and updating to the latest NoMount source and patches..."
+        NOMOUNT_TMP="$KERNEL_DIR/out/nomount"
+        if [ -d "$NOMOUNT_TMP/.git" ]; then
+            (cd "$NOMOUNT_TMP" && git pull origin master) || (cd "$NOMOUNT_TMP" && git pull origin main) || true
+        else
+            mkdir -p "$OUT_DIR"
+            git clone https://github.com/maxsteeel/nomount.git --depth 1 "$NOMOUNT_TMP" || true
+        fi
+
+        if [ -d "$NOMOUNT_TMP/kernel/src" ]; then
+            cp -u "$NOMOUNT_TMP/kernel/src/nomount.c" "$KERNEL_DIR/fs/" 2>/dev/null || true
+            cp -u "$NOMOUNT_TMP/kernel/src/nomount.h" "$KERNEL_DIR/fs/" 2>/dev/null || true
+        fi
+
+        echo "Enabling NoMount in kernel configuration..."
+        echo "CONFIG_NOMOUNT=y" >> "$OUT_DIR/.config"
+    else
+        echo "Disabling NoMount in kernel configuration..."
+        sed -i '/CONFIG_NOMOUNT/d' "$OUT_DIR/.config"
+        echo "CONFIG_NOMOUNT=n" >> "$OUT_DIR/.config"
+    fi
+
     make O="$OUT_DIR" CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="-w" olddefconfig || exit 1
 else
-    echo "Disabling ReSukiSU & SUSFS in kernel configuration..."
+    echo "Disabling ReSukiSU, SUSFS & NoMount in kernel configuration..."
     sed -i '/CONFIG_KSU/d' "$OUT_DIR/.config"
     echo "CONFIG_KSU=n" >> "$OUT_DIR/.config"
+    sed -i '/CONFIG_NOMOUNT/d' "$OUT_DIR/.config"
+    echo "CONFIG_NOMOUNT=n" >> "$OUT_DIR/.config"
     make O="$OUT_DIR" CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="-w" olddefconfig || exit 1
 fi
 
@@ -231,6 +270,9 @@ if [ "$BUILD_RESUKISU" = "y" ]; then
     ZIP_SUFFIX="-ReSukiSU"
     if [ "$BUILD_SUSFS" = "y" ]; then
         ZIP_SUFFIX="${ZIP_SUFFIX}-susfs"
+    fi
+    if [ "$BUILD_NOMOUNT" = "y" ]; then
+        ZIP_SUFFIX="${ZIP_SUFFIX}-nomount"
     fi
 fi
 ZIP_NAME="Capybara-Revived${ZIP_SUFFIX}-$TIME.zip"
