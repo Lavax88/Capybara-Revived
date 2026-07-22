@@ -1,0 +1,67 @@
+name: Build Capybara-Revived
+
+on:
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: 'Kernel Variant'
+        required: true
+        default: 'resukisu'
+        type: choice
+        options:
+          - 'resukisu'
+          - 'stock'
+      tickrate:
+        description: 'Timer frequency (HZ)'
+        required: true
+        default: '300'
+        type: choice
+        options:
+          - '125'
+          - '250'
+          - '300'
+          - '500'
+          - '1000'
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential curl flex git gnupg gperf libelf-dev libssl-dev libtinfo5 make openjdk-11-jdk rsync unzip zip zlib1g-dev libncurses5
+
+      - name: Build Kernel
+        run: |
+          export BUILD_RESUKISU="${{ github.event.inputs.variant == 'resukisu' && 'y' || 'n' }}"
+          export TICKRATE="${{ github.event.inputs.tickrate }}"
+          ./build_kernel.sh
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}-${{ github.run_id }}
+          name: Daily Auto Build - ${{ github.sha }}
+          body: |
+            ### 🛠️ Build Configuration
+            
+            * **Kernel Variant**: ${{ github.event.inputs.variant == 'resukisu' && 'ReSukiSU (Root)' || 'Stock (No Root)' }}
+            * **Tickrate**: ${{ github.event.inputs.tickrate }} Hz
+            * **Clang Toolchain**: Neutron Clang
+            * **Features**: ${{ github.event.inputs.variant == 'resukisu' && 'Tracepoint Syscall Hooking, SELinux Hide' || 'Stock Kernel features' }}
+            
+            > [!WARNING]
+            > **BACKUP your boot.img** before flashing to recover from potential bootloops or other issues.
+            
+            **Commit Details**: [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
+          files: Capybara-Revived-*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

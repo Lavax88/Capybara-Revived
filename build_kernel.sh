@@ -4,13 +4,26 @@ set -e
 # Configuration
 DIR=$(readlink -f .)
 MAIN=$(readlink -f ${DIR}/..)
-KERNEL_DEFCONFIG=capybara_defconfig
+KERNEL_DEFCONFIG=capybara_revived_defconfig
 CLANG_DIR="$MAIN/toolchains/clang"
 KERNEL_DIR=$(pwd)
 OUT_DIR="$KERNEL_DIR/out"
 ZIMAGE_DIR="$OUT_DIR/arch/arm64/boot"
 DTB_DTBO_DIR="$ZIMAGE_DIR/dts/vendor/qcom"
 BUILD_START=$(date +"%s")
+
+# Prompt for ReSukiSU if not already set in environment
+if [ -z "$BUILD_RESUKISU" ]; then
+    read -p "Build with ReSukiSU support? [y/N]: " ksu_choice
+    case "$ksu_choice" in
+        [yY][eE][sS]|[yY])
+            BUILD_RESUKISU=y
+            ;;
+        *)
+            BUILD_RESUKISU=n
+            ;;
+    esac
+fi
 
 # Function to check for existing Clang
 check_clang() {
@@ -25,35 +38,11 @@ check_clang() {
 
 # Install Clang if needed
 if ! check_clang; then
-    echo "No valid Clang found. Installing..."
-    echo "1. AOSP r510928"
-    echo "2. Zyc Clang 23.0"
-    read -p "Choose [1-2]: " clang_choice
-
-    case "$clang_choice" in
-        1)
-            CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android15-release/clang-r510928.tar.gz"
-            ARCHIVE_NAME="clang.tar.gz"
-            mkdir -p "$CLANG_DIR"
-            wget -P "$MAIN" "$CLANG_URL" -O "$MAIN/$ARCHIVE_NAME" || exit 1
-            tar -xf "$MAIN/$ARCHIVE_NAME" -C "$CLANG_DIR" || exit 1
-            rm -f "$MAIN/$ARCHIVE_NAME"
-            ;;
-        2)
-            CLANG_URL="https://github.com/ZyCromerZ/Clang/releases/download/23.0.0git-20260130-release/Clang-23.0.0git-20260130.tar.gz"
-            ARCHIVE_NAME="clang.tar.gz"
-            mkdir -p "$CLANG_DIR"
-            wget -P "$MAIN" "$CLANG_URL" -O "$MAIN/$ARCHIVE_NAME" || exit 1
-            tar -xf "$MAIN/$ARCHIVE_NAME" -C "$CLANG_DIR" || exit 1
-            rm -f "$MAIN/$ARCHIVE_NAME"
-            ;;
-
-
-        *)
-            echo "Invalid choice. Exiting..."
-            exit 1
-            ;;
-    esac
+    echo "No valid Clang found. Installing Neutron Clang via antman..."
+    mkdir -p "$CLANG_DIR"
+    wget -q "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman" -O "$CLANG_DIR/antman" || exit 1
+    chmod +x "$CLANG_DIR/antman"
+    (cd "$CLANG_DIR" && ./antman -S=latest --noconfirm) || exit 1
 
     if ! check_clang; then
         echo "Clang installation failed. Exiting..."
@@ -67,11 +56,31 @@ export SUBARCH=arm64
 
 # Build kernel
 make O="$OUT_DIR" CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="-w" $KERNEL_DEFCONFIG || exit 1
+
+if [ -n "$TICKRATE" ]; then
+    echo "Enabling custom tickrate: ${TICKRATE} Hz..."
+    sed -i '/CONFIG_HZ_/d' "$OUT_DIR/.config"
+    sed -i '/CONFIG_HZ=/d' "$OUT_DIR/.config"
+    echo "CONFIG_HZ_${TICKRATE}=y" >> "$OUT_DIR/.config"
+    echo "CONFIG_HZ=${TICKRATE}" >> "$OUT_DIR/.config"
+    make O="$OUT_DIR" CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="-w" olddefconfig || exit 1
+fi
+
+if [ "$BUILD_RESUKISU" = "y" ]; then
+    echo "Ensuring ReSukiSU submodule is initialized..."
+    git submodule update --init --recursive || exit 1
+    
+    echo "Enabling ReSukiSU in kernel configuration..."
+    echo "CONFIG_KSU=y" >> "$OUT_DIR/.config"
+    echo "CONFIG_KSU_TRACEPOINT_HOOK=y" >> "$OUT_DIR/.config"
+    make O="$OUT_DIR" CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="-w" olddefconfig || exit 1
+fi
+
 make -j17 O="$OUT_DIR" CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="-w" || exit 1
 
 # Clean up old kernel zip files
 echo "Cleaning up old kernel zip files..."
-find "$KERNEL_DIR" -maxdepth 1 -type f -name "Capybara-CLO-*.zip" -exec rm -v {} \;
+find "$KERNEL_DIR" -maxdepth 1 -type f -name "Capybara-Revived-*.zip" -exec rm -v {} \;
 
 # Create temporary anykernel directory
 TIME=$(date "+%Y%m%d-%H%M%S")
@@ -98,7 +107,11 @@ fi
 
 # Create zip file in kernel root directory
 echo "Creating zip package..."
-ZIP_NAME="Capybara-CLO-$TIME.zip"
+ZIP_SUFFIX=""
+if [ "$BUILD_RESUKISU" = "y" ]; then
+    ZIP_SUFFIX="-ReSukiSU"
+fi
+ZIP_NAME="Capybara-Revived${ZIP_SUFFIX}-$TIME.zip"
 cd "$TEMP_ANY_KERNEL_DIR"
 zip -r9 "$KERNEL_DIR/$ZIP_NAME" ./*
 cd ..
