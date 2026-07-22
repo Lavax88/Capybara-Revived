@@ -14,7 +14,7 @@ on:
       tickrate:
         description: 'Timer frequency / Tickrate (Hz)'
         required: true
-        default: '250'
+        default: '300'
         type: choice
         options:
           - '100'
@@ -26,11 +26,11 @@ on:
       lto:
         description: 'Link-Time Optimization (LTO)'
         required: true
-        default: 'full'
+        default: 'thin'
         type: choice
         options:
-          - 'full'
           - 'thin'
+          - 'full'
           - 'no'
       susfs:
         description: 'Enable SUSFS v2.2.0 Support'
@@ -39,6 +39,11 @@ on:
         type: boolean
       uname_spoof:
         description: 'Enable SUSFS Uname Spoofing'
+        required: true
+        default: true
+        type: boolean
+      nomount:
+        description: 'Enable NoMount Support'
         required: true
         default: true
         type: boolean
@@ -53,12 +58,14 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           submodules: recursive
 
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential curl flex git gnupg gperf libelf-dev libssl-dev libtinfo5 make openjdk-11-jdk rsync unzip zip zlib1g-dev libncurses5
+          sudo apt-get install -y bc bison build-essential curl flex git gnupg gperf libelf-dev libssl-dev libtinfo6 make openjdk-11-jdk rsync unzip zip zlib1g-dev libncurses-dev libncurses6
+
 
       - name: Build Kernel
         run: |
@@ -78,6 +85,12 @@ jobs:
             export BUILD_SUSFS_SPOOF_UNAME="y"
           else
             export BUILD_SUSFS_SPOOF_UNAME="n"
+          fi
+
+          if [ "${{ github.event.inputs.nomount }}" = "true" ] && [ "$BUILD_RESUKISU" = "y" ]; then
+            export BUILD_NOMOUNT="y"
+          else
+            export BUILD_NOMOUNT="n"
           fi
 
           export TICKRATE="${{ github.event.inputs.tickrate }}"
@@ -102,6 +115,7 @@ jobs:
             | Root Manager | `${{ github.event.inputs.variant == 'resukisu' && 'ReSukiSU (Root)' || 'Disabled (No Root)' }}` | KernelSU / ReSukiSU |
             | SUSFS Support | `${{ (github.event.inputs.variant == 'resukisu' && github.event.inputs.susfs == 'true') && 'Enabled (v2.2.0)' || 'Disabled' }}` | Super User Secret FS |
             | SUSFS Uname Spoofing | `${{ (github.event.inputs.variant == 'resukisu' && github.event.inputs.susfs == 'true' && github.event.inputs.uname_spoof == 'true') && 'Enabled' || 'Disabled' }}` | Kernel Uname Masking |
+            | NoMount Support | `${{ (github.event.inputs.variant == 'resukisu' && github.event.inputs.nomount == 'true') && 'Enabled' || 'Disabled' }}` | VFS Path Redirection & Injection |
             | Compiler Toolchain | Neutron Clang | LLVM |
 
             > [!CAUTION]
