@@ -4,29 +4,50 @@ on:
   workflow_dispatch:
     inputs:
       variant:
-        description: 'Kernel Variant'
+        description: 'Root Manager / Kernel Variant'
         required: true
         default: 'resukisu'
         type: choice
         options:
           - 'resukisu'
-          - 'stock'
+          - 'noroot'
       tickrate:
-        description: 'Timer frequency (HZ)'
+        description: 'Timer frequency / Tickrate (Hz)'
         required: true
-        default: '300'
+        default: '250'
         type: choice
         options:
-          - '125'
+          - '100'
+          - '150'
           - '250'
           - '300'
           - '500'
           - '1000'
+      lto:
+        description: 'Link-Time Optimization (LTO)'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+          - 'full'
+          - 'thin'
+          - 'no'
+      susfs:
+        description: 'Enable SUSFS v2.2.0 Support'
+        required: true
+        default: true
+        type: boolean
+      uname_spoof:
+        description: 'Enable SUSFS Uname Spoofing'
+        required: true
+        default: true
+        type: boolean
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     permissions:
+
       contents: write
     steps:
       - name: Checkout Code
@@ -41,26 +62,51 @@ jobs:
 
       - name: Build Kernel
         run: |
-          export BUILD_RESUKISU="${{ github.event.inputs.variant == 'resukisu' && 'y' || 'n' }}"
+          if [ "${{ github.event.inputs.variant }}" = "resukisu" ]; then
+            export BUILD_RESUKISU="y"
+          else
+            export BUILD_RESUKISU="n"
+          fi
+
+          if [ "${{ github.event.inputs.susfs }}" = "true" ] && [ "$BUILD_RESUKISU" = "y" ]; then
+            export BUILD_SUSFS="y"
+          else
+            export BUILD_SUSFS="n"
+          fi
+
+          if [ "${{ github.event.inputs.uname_spoof }}" = "true" ] && [ "$BUILD_SUSFS" = "y" ]; then
+            export BUILD_SUSFS_SPOOF_UNAME="y"
+          else
+            export BUILD_SUSFS_SPOOF_UNAME="n"
+          fi
+
           export TICKRATE="${{ github.event.inputs.tickrate }}"
+          export LTO="${{ github.event.inputs.lto }}"
+
+          chmod +x ./build_kernel.sh
           ./build_kernel.sh
 
-      - name: Create Release
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}-${{ github.run_id }}
-          name: Daily Auto Build - ${{ github.sha }}
+          name: Capybara-Revived Build #${{ github.run_number }}
           body: |
-            ### 🛠️ Build Configuration
-            
-            * **Kernel Variant**: ${{ github.event.inputs.variant == 'resukisu' && 'ReSukiSU (Root)' || 'Stock (No Root)' }}
-            * **Tickrate**: ${{ github.event.inputs.tickrate }} Hz
-            * **Clang Toolchain**: Neutron Clang
-            * **Features**: ${{ github.event.inputs.variant == 'resukisu' && 'Tracepoint Syscall Hooking, SELinux Hide' || 'Stock Kernel features' }}
-            
-            > [!WARNING]
-            > **BACKUP your boot.img** before flashing to recover from potential bootloops or other issues.
-            
+            ### Build Configuration & Settings
+
+            | Setting | Configured Value | Details |
+            | :--- | :--- | :--- |
+            | Kernel Release Name | `6.6.77-Capybara-Revived` | Custom GKI Kernel |
+            | CPU Tickrate | `${{ github.event.inputs.tickrate }} Hz` | Configured Frequency |
+            | LTO Mode | `${{ github.event.inputs.lto }}` | Link-Time Optimization |
+            | Root Manager | `${{ github.event.inputs.variant == 'resukisu' && 'ReSukiSU (Root)' || 'Disabled (No Root)' }}` | KernelSU / ReSukiSU |
+            | SUSFS Support | `${{ (github.event.inputs.variant == 'resukisu' && github.event.inputs.susfs == 'true') && 'Enabled (v2.2.0)' || 'Disabled' }}` | Super User Secret FS |
+            | SUSFS Uname Spoofing | `${{ (github.event.inputs.variant == 'resukisu' && github.event.inputs.susfs == 'true' && github.event.inputs.uname_spoof == 'true') && 'Enabled' || 'Disabled' }}` | Kernel Uname Masking |
+            | Compiler Toolchain | Neutron Clang | LLVM |
+
+            > [!CAUTION]
+            > **BACKUP your boot.img / recovery** before flashing to recover from potential issues.
+
             **Commit Details**: [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
           files: Capybara-Revived-*.zip
         env:

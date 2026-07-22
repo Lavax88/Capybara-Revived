@@ -25,6 +25,54 @@ if [ -z "$BUILD_RESUKISU" ]; then
     esac
 fi
 
+# If non-root is selected, skip SUSFS entirely
+if [ "$BUILD_RESUKISU" != "y" ]; then
+    BUILD_SUSFS=n
+    BUILD_SUSFS_SPOOF_UNAME=n
+else
+    # Prompt for SUSFS if not set
+    if [ -z "$BUILD_SUSFS" ]; then
+        read -p "Build with SUSFS support? [y/N]: " susfs_choice
+        case "$susfs_choice" in
+            [yY][eE][sS]|[yY])
+                BUILD_SUSFS=y
+                ;;
+            *)
+                BUILD_SUSFS=n
+                ;;
+        esac
+    fi
+
+    # Prompt for Uname Spoofing if SUSFS is enabled
+    if [ "$BUILD_SUSFS" = "y" ] && [ -z "$BUILD_SUSFS_SPOOF_UNAME" ]; then
+        read -p "Enable SUSFS uname spoofing? [y/N]: " spoof_choice
+        case "$spoof_choice" in
+            [yY][eE][sS]|[yY])
+                BUILD_SUSFS_SPOOF_UNAME=y
+                ;;
+            *)
+                BUILD_SUSFS_SPOOF_UNAME=n
+                ;;
+        esac
+    fi
+fi
+
+# Prompt for LTO mode if not set
+if [ -z "$LTO" ]; then
+    read -p "Select LTO mode [full/thin/none] (default: full): " lto_choice
+    case "$lto_choice" in
+        thin|THIN)
+            LTO=thin
+            ;;
+        none|no|NONE|NO)
+            LTO=none
+            ;;
+        *)
+            LTO=full
+            ;;
+    esac
+fi
+
 # Function to check for existing Clang
 check_clang() {
     if [ -d "$CLANG_DIR" ] && [ -f "$CLANG_DIR/bin/clang" ]; then
@@ -54,8 +102,34 @@ fi
 export ARCH=arm64
 export SUBARCH=arm64
 
-# Build kernel
+# Configure LOCALVERSION string for all builds
+export LOCALVERSION="-Capybara-Revived"
+
+
+# Initial defconfig build
 make O="$OUT_DIR" CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="-w" $KERNEL_DEFCONFIG || exit 1
+
+if [ -n "$LTO" ]; then
+    echo "Configuring LTO mode: ${LTO}..."
+    sed -i '/CONFIG_LTO_/d' "$OUT_DIR/.config"
+    case "$LTO" in
+        full)
+            echo "CONFIG_LTO_CLANG_FULL=y" >> "$OUT_DIR/.config"
+            echo "CONFIG_LTO_CLANG=y" >> "$OUT_DIR/.config"
+            ;;
+        thin)
+            echo "CONFIG_LTO_CLANG_THIN=y" >> "$OUT_DIR/.config"
+            echo "CONFIG_LTO_CLANG=y" >> "$OUT_DIR/.config"
+            ;;
+        none|no)
+            echo "CONFIG_LTO_NONE=y" >> "$OUT_DIR/.config"
+            sed -i '/CONFIG_LTO_CLANG/d' "$OUT_DIR/.config"
+            echo "CONFIG_LTO_CLANG=n" >> "$OUT_DIR/.config"
+            ;;
+    esac
+    make O="$OUT_DIR" CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="-w" olddefconfig || exit 1
+fi
+
 
 if [ -n "$TICKRATE" ]; then
     echo "Enabling custom tickrate: ${TICKRATE} Hz..."
@@ -67,12 +141,57 @@ if [ -n "$TICKRATE" ]; then
 fi
 
 if [ "$BUILD_RESUKISU" = "y" ]; then
-    echo "Ensuring ReSukiSU submodule is initialized..."
-    git submodule update --init --recursive || exit 1
-    
+    echo "Fetching and updating to the latest ReSukiSU root manager..."
+    git submodule update --init --remote --recursive KernelSU || git submodule update --init --recursive KernelSU
+
     echo "Enabling ReSukiSU in kernel configuration..."
     echo "CONFIG_KSU=y" >> "$OUT_DIR/.config"
     echo "CONFIG_KSU_TRACEPOINT_HOOK=y" >> "$OUT_DIR/.config"
+
+    if [ "$BUILD_SUSFS" = "y" ]; then
+        echo "Fetching latest SUSFS patches..."
+        SUSFS_TMP="$KERNEL_DIR/out/susfs4ksu"
+        if [ -d "$SUSFS_TMP/.git" ]; then
+            (cd "$SUSFS_TMP" && git pull origin gki-android15-6.6) || true
+        else
+            mkdir -p "$OUT_DIR"
+            git clone https://gitlab.com/simonpunk/susfs4ksu.git --branch gki-android15-6.6 --depth 1 "$SUSFS_TMP" || true
+        fi
+        if [ -d "$SUSFS_TMP/kernel_patches/fs" ]; then
+            cp -u "$SUSFS_TMP/kernel_patches/fs/susfs.c" "$KERNEL_DIR/fs/" 2>/dev/null || true
+            cp -u "$SUSFS_TMP/kernel_patches/include/linux/susfs"* "$KERNEL_DIR/include/linux/" 2>/dev/null || true
+        fi
+
+        echo "Enabling SUSFS in kernel configuration..."
+        echo "CONFIG_KSU_SUSFS=y" >> "$OUT_DIR/.config"
+        echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> "$OUT_DIR/.config"
+        echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> "$OUT_DIR/.config"
+        echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> "$OUT_DIR/.config"
+        echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> "$OUT_DIR/.config"
+        echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> "$OUT_DIR/.config"
+        echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> "$OUT_DIR/.config"
+        echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> "$OUT_DIR/.config"
+        echo "CONFIG_KSU_SUSFS_SUS_MAP=y" >> "$OUT_DIR/.config"
+
+        if [ "$BUILD_SUSFS_SPOOF_UNAME" = "y" ]; then
+            echo "Enabling SUSFS uname spoofing..."
+            echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> "$OUT_DIR/.config"
+        else
+            echo "Disabling SUSFS uname spoofing..."
+            sed -i '/CONFIG_KSU_SUSFS_SPOOF_UNAME/d' "$OUT_DIR/.config"
+            echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=n" >> "$OUT_DIR/.config"
+        fi
+    else
+        echo "Disabling SUSFS in kernel configuration..."
+        sed -i '/CONFIG_KSU_SUSFS/d' "$OUT_DIR/.config"
+        echo "CONFIG_KSU_SUSFS=n" >> "$OUT_DIR/.config"
+    fi
+
+    make O="$OUT_DIR" CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="-w" olddefconfig || exit 1
+else
+    echo "Disabling ReSukiSU & SUSFS in kernel configuration..."
+    sed -i '/CONFIG_KSU/d' "$OUT_DIR/.config"
+    echo "CONFIG_KSU=n" >> "$OUT_DIR/.config"
     make O="$OUT_DIR" CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="-w" olddefconfig || exit 1
 fi
 
@@ -110,6 +229,9 @@ echo "Creating zip package..."
 ZIP_SUFFIX=""
 if [ "$BUILD_RESUKISU" = "y" ]; then
     ZIP_SUFFIX="-ReSukiSU"
+    if [ "$BUILD_SUSFS" = "y" ]; then
+        ZIP_SUFFIX="${ZIP_SUFFIX}-susfs"
+    fi
 fi
 ZIP_NAME="Capybara-Revived${ZIP_SUFFIX}-$TIME.zip"
 cd "$TEMP_ANY_KERNEL_DIR"
