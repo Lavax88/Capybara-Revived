@@ -71,6 +71,19 @@ else
     fi
 fi
 
+# Prompt for DroidSpaces if not set
+if [ -z "$BUILD_DROIDSPACES" ]; then
+    read -p "Build with DroidSpaces support? [y/N]: " droidspaces_choice
+    case "$droidspaces_choice" in
+        [yY][eE][sS]|[yY])
+            BUILD_DROIDSPACES=y
+            ;;
+        *)
+            BUILD_DROIDSPACES=n
+            ;;
+    esac
+fi
+
 # Prompt for LTO mode if not set
 if [ -z "$LTO" ]; then
     read -p "Select LTO mode [full/thin/none] (default: full): " lto_choice
@@ -154,6 +167,23 @@ if [ -n "$TICKRATE" ]; then
     make O="$OUT_DIR" CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="-w" olddefconfig || exit 1
 fi
 
+echo "Fetching and updating to the latest Baseband-guard security module..."
+BBG_TMP="$KERNEL_DIR/out/baseband-guard"
+if [ -d "$BBG_TMP/.git" ]; then
+    (cd "$BBG_TMP" && (git pull origin main 2>/dev/null || git pull origin master 2>/dev/null)) || true
+else
+    mkdir -p "$OUT_DIR"
+    git clone https://github.com/vc-teahouse/Baseband-guard.git --depth 1 "$BBG_TMP" || true
+fi
+
+if [ -d "$BBG_TMP" ]; then
+    rsync -a --exclude='.git' --exclude='.github' "$BBG_TMP/" "$KERNEL_DIR/Baseband-guard/" 2>/dev/null || cp -r "$BBG_TMP/"* "$KERNEL_DIR/Baseband-guard/" 2>/dev/null || true
+    rm -rf "$KERNEL_DIR/Baseband-guard/.github" 2>/dev/null || true
+fi
+
+echo "Enabling Baseband-guard in kernel configuration..."
+echo "CONFIG_BBG=y" >> "$OUT_DIR/.config"
+
 if [ "$BUILD_RESUKISU" = "y" ]; then
     echo "Fetching and updating to the latest ReSukiSU root manager..."
     git submodule update --init --remote --recursive KernelSU || git submodule update --init --recursive KernelSU
@@ -235,6 +265,45 @@ else
     make O="$OUT_DIR" CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="-w" olddefconfig || exit 1
 fi
 
+if [ "$BUILD_DROIDSPACES" = "y" ]; then
+    echo "Fetching and updating to the latest DroidSpaces patches..."
+    DROIDSPACES_TMP="$KERNEL_DIR/out/droidspaces"
+    if [ -d "$DROIDSPACES_TMP/.git" ]; then
+        (cd "$DROIDSPACES_TMP" && git pull origin main) || true
+    else
+        mkdir -p "$OUT_DIR"
+        git clone https://github.com/ravindu644/Droidspaces-OSS.git --depth 1 "$DROIDSPACES_TMP" || true
+    fi
+
+    if [ -f "$DROIDSPACES_TMP/Documentation/resources/kernel-patches/GKI/below-kernel-6.12/001.GKI-below-6.12-fix_sysvipc_kabi_6_7_8.patch" ]; then
+        echo "Applying DroidSpaces GKI patch..."
+        patch -p1 --forward -r - < "$DROIDSPACES_TMP/Documentation/resources/kernel-patches/GKI/below-kernel-6.12/001.GKI-below-6.12-fix_sysvipc_kabi_6_7_8.patch" || true
+    fi
+
+    echo "Enabling DroidSpaces in kernel configuration..."
+    echo "CONFIG_SYSVIPC=y" >> "$OUT_DIR/.config"
+    echo "CONFIG_POSIX_MQUEUE=y" >> "$OUT_DIR/.config"
+    echo "CONFIG_IPC_NS=y" >> "$OUT_DIR/.config"
+    echo "CONFIG_PID_NS=y" >> "$OUT_DIR/.config"
+    echo "CONFIG_DEVTMPFS=y" >> "$OUT_DIR/.config"
+    echo "CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y" >> "$OUT_DIR/.config"
+    echo "CONFIG_USER_NS=y" >> "$OUT_DIR/.config"
+    echo "CONFIG_NETFILTER_XT_TARGET_REJECT=y" >> "$OUT_DIR/.config"
+    echo "CONFIG_NETFILTER_XT_TARGET_LOG=y" >> "$OUT_DIR/.config"
+    echo "CONFIG_NETFILTER_XT_MATCH_RECENT=y" >> "$OUT_DIR/.config"
+    echo "CONFIG_IP_SET=y" >> "$OUT_DIR/.config"
+    echo "CONFIG_IP_SET_HASH_IP=y" >> "$OUT_DIR/.config"
+
+    make O="$OUT_DIR" CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="-w" olddefconfig || exit 1
+else
+    echo "Disabling DroidSpaces in kernel configuration..."
+    sed -i '/CONFIG_SYSVIPC/d' "$OUT_DIR/.config"
+    echo "CONFIG_SYSVIPC=n" >> "$OUT_DIR/.config"
+    sed -i '/CONFIG_IPC_NS/d' "$OUT_DIR/.config"
+    echo "CONFIG_IPC_NS=n" >> "$OUT_DIR/.config"
+    make O="$OUT_DIR" CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="-w" olddefconfig || exit 1
+fi
+
 make -j17 O="$OUT_DIR" CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="-w" || exit 1
 
 # Clean up old kernel zip files
@@ -275,6 +344,9 @@ if [ "$BUILD_RESUKISU" = "y" ]; then
     if [ "$BUILD_NOMOUNT" = "y" ]; then
         ZIP_SUFFIX="${ZIP_SUFFIX}-nomount"
     fi
+fi
+if [ "$BUILD_DROIDSPACES" = "y" ]; then
+    ZIP_SUFFIX="${ZIP_SUFFIX}-droidspaces"
 fi
 ZIP_NAME="Capybara-Revived${ZIP_SUFFIX}-$TIME.zip"
 cd "$TEMP_ANY_KERNEL_DIR"
