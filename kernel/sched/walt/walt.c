@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2025, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include <linux/syscore_ops.h>
@@ -84,6 +84,11 @@ unsigned int __read_mostly sched_init_task_load_windows;
  * sched_load_granule.
  */
 unsigned int __read_mostly sched_load_granule;
+
+static struct walt_related_thread_group
+			*related_thread_groups[MAX_NUM_CGROUP_COLOC_ID];
+static LIST_HEAD(active_related_thread_groups);
+static DEFINE_RWLOCK(related_thread_group_lock);
 
 bool walt_is_idle_task(struct task_struct *p)
 {
@@ -1187,15 +1192,16 @@ static void migrate_busy_time_subtraction(struct task_struct *p, int new_cpu)
 	wallclock = walt_sched_clock();
 	walt_update_task_ravg(p, task_rq(p), TASK_MIGRATE, wallclock, 0);
 
+	/*
+	 * Update task's cycles wrt to the new cpu.
+	 */
+	wts->cpu_cycles = walt_get_cycle_counts_cb(new_cpu, wallclock);
+
 	if (wts->window_start != src_wrq->window_start)
 		WALT_BUG(WALT_BUG_WALT, p,
 				"CPU%d: %s task %s(%d)'s ws=%llu not equal to src_rq %d's ws=%llu",
 				raw_smp_processor_id(), __func__, p->comm, p->pid,
 				wts->window_start, src_rq->cpu, src_wrq->window_start);
-
-
-	/* safe to update the task cyc cntr for new_cpu without the new_cpu rq_lock */
-	update_task_cpu_cycles(p, new_cpu, wallclock);
 
 	new_task = is_new_task(p);
 	/* Protected by rq_lock */
@@ -1207,8 +1213,15 @@ static void migrate_busy_time_subtraction(struct task_struct *p, int new_cpu)
 	 * load has to reported on a single CPU regardless.
 	 */
 	if (grp) {
-		struct group_cpu_time *cpu_time = &src_wrq->grp_time;
+		struct group_cpu_time *cpu_time;
 
+		if (grp != related_thread_groups[DEFAULT_CGROUP_COLOC_ID])
+			WALT_BUG(WALT_BUG_WALT, p,
+				"CPU%d: %s task %s(%d)'s grp=%p not equal to rtg[1]=%p'",
+				raw_smp_processor_id(), __func__, p->comm, p->pid,
+				grp, related_thread_groups[DEFAULT_CGROUP_COLOC_ID]);
+
+		cpu_time = &src_wrq->grp_time;
 		src_curr_runnable_sum = &cpu_time->curr_runnable_sum;
 		src_prev_runnable_sum = &cpu_time->prev_runnable_sum;
 		src_nt_curr_runnable_sum = &cpu_time->nt_curr_runnable_sum;
@@ -1273,8 +1286,15 @@ static void migrate_busy_time_addition(struct task_struct *p, int new_cpu, u64 w
 	 * load has to reported on a single CPU regardless.
 	 */
 	if (grp) {
-		struct group_cpu_time *cpu_time = &dest_wrq->grp_time;
+		struct group_cpu_time *cpu_time;
 
+		if (grp != related_thread_groups[DEFAULT_CGROUP_COLOC_ID])
+			WALT_BUG(WALT_BUG_WALT, p,
+				"CPU%d: %s task %s(%d)'s grp=%p not equal to rtg[1]=%p'",
+				raw_smp_processor_id(), __func__, p->comm, p->pid,
+				grp, related_thread_groups[DEFAULT_CGROUP_COLOC_ID]);
+
+		cpu_time = &dest_wrq->grp_time;
 		dst_curr_runnable_sum = &cpu_time->curr_runnable_sum;
 		dst_prev_runnable_sum = &cpu_time->prev_runnable_sum;
 		dst_nt_curr_runnable_sum = &cpu_time->nt_curr_runnable_sum;
@@ -2203,23 +2223,10 @@ static void update_lst(struct walt_task_struct *wts, u64 wallclock,
 		/* target time after which task will come out of LST state */
 		wts->lst_tgt_ns = wallclock +
 			(LST_ACTIVATION_TIMEOUT * MSEC_TO_NSEC * lst_delay_factor);
-		wts->continuous_active = 0;
-	} else {
-		if (wts->lst_tgt_ns && (wts->lst_tgt_ns < wallclock)) {
-			wts->lst = false;
-			wts->lst_tgt_ns = 0;
-		}
-
-		wts->continuous_active++;
-
-		/*
-		 * reduce lst_state_counter for active task if task is active, this in-turn
-		 * influences calculation for LST delay.
-		 */
-		if (wts->continuous_active > 10) {
-			wts->lst_state_counter = max_t(s64, wts->lst_state_counter - 10, 0);
-			wts->continuous_active = 0;
-		}
+	} else if (wts->lst_tgt_ns && (wts->lst_tgt_ns < wallclock)) {
+		wts->lst = false;
+		wts->lst_tgt_ns = 0;
+		wts->lst_state_counter = 0;
 	}
 
 	/* tracking the number of windows where a task has encountered an event. */
@@ -2820,7 +2827,6 @@ static inline void __sched_fork_init(struct task_struct *p)
 	wts->lst		= false;
 	wts->lst_tgt_ns		= 0;
 	wts->lst_state_counter	= 0;
-	wts->continuous_active	= 0;
 	wts->pipeline_activity_cnt = 0;
 	atomic_set(&wts->event_windows, 0);
 }
@@ -2897,11 +2903,12 @@ static void init_new_task_load(struct task_struct *p)
 }
 
 int remove_heavy(struct walt_task_struct *wts);
+static int __sched_set_group_id(struct task_struct *p, unsigned int group_id);
 static void walt_task_dead(struct task_struct *p)
 {
 	struct walt_task_struct *wts = (struct walt_task_struct *) p->android_vendor_data1;
 
-	sched_set_group_id(p, 0);
+	__sched_set_group_id(p, 0);
 
 	if (wts->low_latency & WALT_LOW_LATENCY_PIPELINE_BIT)
 		remove_pipeline(wts);
@@ -3347,11 +3354,6 @@ static void transfer_busy_time(struct rq *rq,
  * The children inherits the group id from the parent.
  */
 
-static struct walt_related_thread_group
-			*related_thread_groups[MAX_NUM_CGROUP_COLOC_ID];
-static LIST_HEAD(active_related_thread_groups);
-static DEFINE_RWLOCK(related_thread_group_lock);
-
 static inline
 void update_best_cluster(struct walt_related_thread_group *grp,
 				   u64 combined_demand, bool boost)
@@ -3691,7 +3693,7 @@ int sched_set_group_id(struct task_struct *p, unsigned int group_id)
 	if (group_id == DEFAULT_CGROUP_COLOC_ID)
 		return -EINVAL;
 
-	return __sched_set_group_id(p, group_id);
+	return 0;
 }
 
 unsigned int sched_get_group_id(struct task_struct *p)
@@ -5160,8 +5162,10 @@ static void android_vh_scheduler_tick(void *unused, struct rq *rq)
 	/* IPC based smart FMAX */
 	cluster = cpu_cluster(cpu);
 	smart_freq_info = cluster->smart_freq_info;
+
 	if (smart_freq_init_done &&
-		smart_freq_info->smart_freq_ipc_participation_mask & IPC_PARTICIPATION) {
+		smart_freq_info->smart_freq_ipc_participation_mask & IPC_PARTICIPATION
+		&& IS_ENABLED(CONFIG_ARM64_AMU_EXTN)) {
 		last_ipc_level = per_cpu(ipc_level, cpu);
 		last_deactivate_ns = per_cpu(ipc_deactivate_ns, cpu);
 		ipc = calculate_ipc(cpu);

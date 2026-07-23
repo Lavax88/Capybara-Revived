@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (c) 2011-2017, The Linux Foundation. All rights reserved.
 // Copyright (c) 2018, Linaro Limited
-// Copyright (c) 2022, 2024-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
 
 #include <linux/irq.h>
 #include <linux/kernel.h>
@@ -1582,6 +1582,7 @@ static void qcom_slim_ngd_notify_slaves(struct qcom_slim_ngd_ctrl *ctrl)
 
 		if (slim_get_logical_addr(sbdev))
 			dev_err(ctrl->dev, "Failed to get logical address\n");
+		put_device(&sbdev->dev);
 	}
 }
 
@@ -2132,6 +2133,7 @@ static int qcom_slim_ngd_ctrl_probe(struct platform_device *pdev)
 		ctrl->sysfs_created = true;
 	}
 
+	ctrl->dev = dev;
 	ctrl->nb.notifier_call = qcom_slim_ngd_ssr_notify;
 	ctrl->notifier = qcom_register_ssr_notifier("lpass", &ctrl->nb);
 	if (IS_ERR(ctrl->notifier)) {
@@ -2140,7 +2142,6 @@ static int qcom_slim_ngd_ctrl_probe(struct platform_device *pdev)
 		goto remove_ipc_sysfs;
 	}
 
-	ctrl->dev = dev;
 	ctrl->framer.rootfreq = SLIM_ROOT_FREQ >> 3;
 	ctrl->framer.superfreq =
 		ctrl->framer.rootfreq / SLIM_CL_PER_SUPERFRAME_DIV8;
@@ -2254,6 +2255,7 @@ static int __maybe_unused qcom_slim_ngd_runtime_suspend(struct device *dev)
 {
 	struct qcom_slim_ngd_ctrl *ctrl = dev_get_drvdata(dev);
 	struct qcom_slim_ngd *ngd = ctrl->ngd;
+	unsigned long flags;
 	int ret = 0;
 
 	SLIM_INFO(ctrl, "Slim runtime suspend\n");
@@ -2268,7 +2270,29 @@ static int __maybe_unused qcom_slim_ngd_runtime_suspend(struct device *dev)
 		mutex_unlock(&ctrl->suspend_resume_lock);
 		return 0;
 	}
+
+	/* Acquire tx_lock to prevent new messages during DMA exit */
+	if (!mutex_trylock(&ctrl->tx_lock)) {
+		mutex_unlock(&ctrl->suspend_resume_lock);
+		SLIM_INFO(ctrl, "TX in progress, deferring suspend\n");
+		return -EBUSY;
+	}
+
+	/* Check for pending TX DMA descriptors */
+	spin_lock_irqsave(&ctrl->tx_buf_lock, flags);
+	if (ctrl->tx_head != ctrl->tx_tail) {
+		spin_unlock_irqrestore(&ctrl->tx_buf_lock, flags);
+		mutex_unlock(&ctrl->tx_lock);
+		mutex_unlock(&ctrl->suspend_resume_lock);
+		SLIM_INFO(ctrl, "TX DMA pending (head:%d tail:%d), deferring suspend\n",
+			  ctrl->tx_head, ctrl->tx_tail);
+		return -EBUSY;
+	}
+	spin_unlock_irqrestore(&ctrl->tx_buf_lock, flags);
+
 	qcom_slim_ngd_exit_dma(ctrl);
+
+	mutex_unlock(&ctrl->tx_lock);
 
 	qcom_slim_ngd_disable_irq(ctrl);
 	writel_relaxed(0x0, ngd->base + NGD_INT_EN);

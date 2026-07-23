@@ -2,7 +2,7 @@
 /*
  * Copyright (c) 2009-2017, 2021 The Linux Foundation. All rights reserved.
  * Copyright (c) 2017-2019, Linaro Ltd.
- * Copyright (c) 2022-2025, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include <linux/debugfs.h>
@@ -64,6 +64,7 @@ enum {
 	HW_PLATFORM_IDP = 34,
 	HW_PLATFORM_CRD = 40,
 	HW_PLATFORM_WDP = 36,
+	HW_PLATFORM_EVK = 47,
 	HW_PLATFORM_INVALID
 };
 
@@ -91,6 +92,7 @@ static const char * const hw_platform[] = {
 	[HW_PLATFORM_IDP] = "IDP",
 	[HW_PLATFORM_CRD] = "CRD",
 	[HW_PLATFORM_WDP] = "WDP",
+	[HW_PLATFORM_EVK] = "EVK",
 };
 
 enum {
@@ -645,7 +647,19 @@ static const struct soc_id soc_id[] = {
 	{ qcom_board_id(TUNAP) },
 	{ qcom_board_id(KERA) },
 	{ qcom_board_id(KERAP) },
+	{ qcom_board_id(KERA_QMB) },
+	{ qcom_board_id(KERAP_QNA) },
 	{ qcom_board_id(QCS610) },
+	{ qcom_board_id(CQ8750S) },
+	{ qcom_board_id(CQ8725S) },
+	{ qcom_board_id(MONTAGUE) },
+	{ qcom_board_id(MONTAGUEP) },
+	{ qcom_board_id(CQ7790S) },
+	{ qcom_board_id(CQ7790M) },
+	{ qcom_board_id(MONTAGUEQMB) },
+	{ qcom_board_id(CQ4390M) },
+	{ qcom_board_id(CQ4390S) },
+	{ qcom_board_id(MONTAGUEQMB) },
 };
 
 static struct attribute *msm_custom_socinfo_attrs[MAX_SOCINFO_ATTRS];
@@ -1732,7 +1746,7 @@ static int qcom_socinfo_probe(struct platform_device *pdev)
 	if (!qs->attr.soc_id || !qs->attr.revision)
 		return -ENOMEM;
 
-	if (offsetof(struct socinfo, serial_num) <= item_size) {
+	if (offsetofend(struct socinfo, serial_num) <= item_size) {
 		qs->attr.serial_number = devm_kasprintf(&pdev->dev, GFP_KERNEL,
 							"%u",
 							le32_to_cpu(info->serial_num));

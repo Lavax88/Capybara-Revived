@@ -46,7 +46,8 @@
 
 struct cma cma_areas[MAX_CMA_AREAS];
 unsigned cma_area_count;
-static DEFINE_MUTEX(cma_mutex);
+DEFINE_MUTEX(cma_mutex);
+EXPORT_SYMBOL_GPL(cma_mutex);
 
 phys_addr_t cma_get_base(const struct cma *cma)
 {
@@ -166,6 +167,25 @@ core_initcall(cma_init_reserved_areas);
 void __init cma_reserve_pages_on_error(struct cma *cma)
 {
 	cma->reserve_pages_on_error = true;
+}
+
+unsigned long cma_get_first_virtzone_base(int nid)
+{
+        struct pglist_data *pgdata;
+        struct zone *zone;
+        int zone_idx;
+
+        pgdata = NODE_DATA(nid);
+        if (!pgdata)
+                return 0;
+
+        for (zone_idx = ZONE_NOSPLIT; zone_idx <= ZONE_NOMERGE; zone_idx++) {
+                zone = &pgdata->node_zones[zone_idx];
+                if (zone->zone_start_pfn)
+                        return zone->zone_start_pfn << PAGE_SHIFT;
+        }
+
+        return 0;
 }
 
 /**
@@ -466,7 +486,6 @@ struct page *__cma_alloc(struct cma *cma, unsigned long count,
 		goto out;
 
 	trace_android_vh_cma_alloc_set_max_retries(&max_retries);
-	trace_cma_alloc_start(cma->name, count, align);
 
 	mask = cma_bitmap_aligned_mask(cma, align);
 	offset = cma_bitmap_aligned_offset(cma, align);
@@ -476,6 +495,7 @@ struct page *__cma_alloc(struct cma *cma, unsigned long count,
 	if (bitmap_count > bitmap_maxno)
 		goto out;
 
+	trace_cma_alloc_start(cma->name, count, align);
 	trace_android_vh_cma_alloc_retry(cma->name, &max_retries);
 	for (;;) {
 		spin_lock_irq(&cma->lock);
@@ -550,7 +570,6 @@ struct page *__cma_alloc(struct cma *cma, unsigned long count,
 	}
 
 	if (ret && !(gfp_mask & __GFP_NOWARN)) {
-		trace_android_vh_cma_alloc_fail(cma->name, cma->count, count);
 		pr_err_ratelimited("%s: %s: alloc failed, req-size: %lu pages, ret: %d\n",
 				   __func__, cma->name, count, ret);
 		cma_debug_show_areas(cma);

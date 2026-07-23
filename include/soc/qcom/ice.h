@@ -9,17 +9,7 @@
 #include <linux/types.h>
 #include <linux/blk-crypto.h>
 
-struct qcom_ice {
-	struct device *dev;
-	void __iomem *base;
-	struct device_link *link;
-
-	struct clk *core_clk;
-	u8 hwkm_version;
-	bool use_hwkm;
-	bool hwkm_init_complete;
-	bool handle_clks;
-};
+struct qcom_ice;
 
 enum qcom_ice_crypto_key_size {
 	QCOM_ICE_CRYPTO_KEY_SIZE_INVALID	= 0x0,
@@ -54,4 +44,6 @@ int qcom_ice_derive_sw_secret(struct qcom_ice *ice, const u8 wkey[],
 			      unsigned int wkey_size,
 			      u8 sw_secret[BLK_CRYPTO_SW_SECRET_SIZE]);
 struct qcom_ice *of_qcom_ice_get(struct device *dev);
+struct qcom_ice *devm_of_qcom_ice_get(struct device *dev);
+
 #endif /* __QCOM_ICE_H__ */

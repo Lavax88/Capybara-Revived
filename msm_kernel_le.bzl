@@ -27,6 +27,8 @@ load(":msm_common.bzl", "define_top_level_config", "gen_config_without_source_li
 load(":msm_dtc.bzl", "define_dtc_dist")
 load(":target_variants.bzl", "le_variants")
 
+LE_SPECIAL_TARGETS = ["sun-le", "kera-le"]
+
 def _define_build_config(
         msm_target,
         target,
@@ -135,11 +137,10 @@ def _define_kernel_build(
 
     out_list.extend([
         "scripts/sign-file",
-        "certs/signing_key.pem",
         "certs/signing_key.x509",
     ])
 
-    if target.split("_")[0] in ["sun-le", "kera-le"]:
+    if target.split("_")[0] in LE_SPECIAL_TARGETS:
         out_list += ["utsrelease.h"]
         in_tree_module_list = in_tree_module_list + get_gki_modules_list("arm64")
         in_tree_module_list = in_tree_module_list + get_kunit_modules_list("arm64")
@@ -155,6 +156,8 @@ def _define_kernel_build(
         dtstree = dtstree,
         kmi_symbol_list = None,
         additional_kmi_symbol_lists = None,
+        module_signing_key = ":signing_key",
+        system_trusted_key = ":verity_cert.pem",
         visibility = ["//visibility:public"],
     )
 
@@ -262,7 +265,10 @@ def define_msm_le(
     # Enforce format of "//msm-kernel:target-foo_variant-bar" (underscore is the delimeter
     # between target and variant)
     target = msm_target.replace("_", "-") + "_" + variant.replace("_", "-")
-    le_target = msm_target.split("-")[0]
+    if msm_target in LE_SPECIAL_TARGETS:
+        le_target = msm_target
+    else:
+        le_target = msm_target.split("-")[0]
 
     dtb_list = get_dtb_list(le_target)
     dtbo_list = get_dtbo_list(le_target)

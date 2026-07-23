@@ -1,7 +1,7 @@
-load(":target_variants.bzl", "la_variants")
-load(":msm_kernel_la.bzl", "define_msm_la")
-load(":msm_kernel_16k_la.bzl", "define_msm_16k_la")
 load(":image_opts.bzl", "boot_image_opts")
+load(":msm_kernel_16k_la.bzl", "define_msm_16k_la")
+load(":msm_kernel_la.bzl", "define_msm_la")
+load(":target_variants.bzl", "la_variants")
 
 target_name = "sun"
 
@@ -56,6 +56,7 @@ def define_sun():
         "drivers/firmware/qcom-scm.ko",
         "drivers/firmware/qcom/si_core/mem_object.ko",
         "drivers/firmware/qcom/si_core/si_core_module.ko",
+        "drivers/gpio/gpio-pca953x.ko",
         "drivers/gpu/drm/bridge/lt9611uxc.ko",
         "drivers/gpu/drm/display/drm_display_helper.ko",
         "drivers/gpu/drm/display/drm_dp_aux_bus.ko",
@@ -115,6 +116,7 @@ def define_sun():
         "drivers/misc/qseecom_proxy.ko",
         "drivers/mmc/host/cqhci.ko",
         "drivers/mmc/host/sdhci-msm.ko",
+        "drivers/net/phy/at803x.ko",
         "drivers/nvmem/nvmem_qcom-spmi-sdam.ko",
         "drivers/nvmem/nvmem_qfprom.ko",
         "drivers/pci/controller/pci-msm-drv.ko",
@@ -236,6 +238,7 @@ def define_sun():
         "drivers/soc/qcom/smp2p.ko",
         "drivers/soc/qcom/smp2p_sleepstate.ko",
         "drivers/soc/qcom/socinfo.ko",
+        "drivers/soc/qcom/spmi-pmic-err-debug.ko",
         "drivers/soc/qcom/sps/sps_drv.ko",
         "drivers/soc/qcom/sys_pm_vx.ko",
         "drivers/soc/qcom/sysmon_subsystem_stats.ko",

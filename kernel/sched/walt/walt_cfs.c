@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2025, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include <linux/seq_file.h>
@@ -703,12 +703,12 @@ static inline unsigned long walt_em_cpu_energy(struct em_perf_domain *pd,
 			SCHED_CAPACITY_SHIFT);
 
 	/*
-	 * The capacity of a CPU in the domain at the performance state (ps)
-	 * can be computed as:
+	 * The performance (capacity) of a CPU in the domain at the performance
+	 * state (ps) can be computed as:
 	 *
-	 *             ps->freq * scale_cpu
-	 *   ps->cap = --------------------                          (1)
-	 *                 cpu_max_freq
+	 *                     ps->freq * scale_cpu
+	 *   ps->performance = --------------------                  (1)
+	 *                         cpu_max_freq
 	 *
 	 * So, ignoring the costs of idle states (which are not available in
 	 * the EM), the energy consumed by this CPU at that performance state
@@ -716,9 +716,10 @@ static inline unsigned long walt_em_cpu_energy(struct em_perf_domain *pd,
 	 *
 	 *             ps->power * cpu_util
 	 *   cpu_nrg = --------------------                          (2)
-	 *                   ps->cap
+	 *               ps->performance
 	 *
-	 * since 'cpu_util / ps->cap' represents its percentage of busy time.
+	 * since 'cpu_util / ps->performance' represents its percentage of busy
+	 * time.
 	 *
 	 *   NOTE: Although the result of this computation actually is in
 	 *         units of power, it can be manipulated as an energy value
@@ -728,9 +729,9 @@ static inline unsigned long walt_em_cpu_energy(struct em_perf_domain *pd,
 	 * By injecting (1) in (2), 'cpu_nrg' can be re-expressed as a product
 	 * of two terms:
 	 *
-	 *             ps->power * cpu_max_freq   cpu_util
-	 *   cpu_nrg = ------------------------ * ---------          (3)
-	 *                    ps->freq            scale_cpu
+	 *             ps->power * cpu_max_freq
+	 *   cpu_nrg = ------------------------ * cpu_util           (3)
+	 *               ps->freq * scale_cpu
 	 *
 	 * The first term is static, and is stored in the em_perf_state struct
 	 * as 'ps->cost'.
@@ -740,10 +741,9 @@ static inline unsigned long walt_em_cpu_energy(struct em_perf_domain *pd,
 	 * total energy of the domain (which is the simple sum of the energy of
 	 * all of its CPUs) can be factorized as:
 	 *
-	 *            ps->cost * \Sum cpu_util
-	 *   pd_nrg = ------------------------                       (4)
-	 *                  scale_cpu
+	 *   pd_nrg = ps->cost * \Sum cpu_util                       (4)
 	 */
+
 	if (max_util >= 1024)
 		max_util = 1023;
 
@@ -754,7 +754,7 @@ static inline unsigned long walt_em_cpu_energy(struct em_perf_domain *pd,
 		output->max_util[x] = max_util;
 		output->sum_util[x] = sum_util;
 	}
-	return cost * sum_util / scale_cpu;
+	return cost * sum_util;
 }
 
 /*
@@ -914,20 +914,30 @@ int walt_find_energy_efficient_cpu(struct task_struct *p, int prev_cpu,
 		cpumask_test_cpu(pipeline_cpu, p->cpus_ptr) &&
 		cpu_active(pipeline_cpu) &&
 		!cpu_halted(pipeline_cpu)) {
-		/*
-		 * A situation of target pipeline cpu already running a pipeline
-		 * task can only happen because of pipeline cpu swapping(i.e 'p'
-		 * is already a pipeline task running on pipeline cpu.
-		 * 'find_heaviest_topapp' where a task is evaluated as pipeline
-		 * (i.e 'p' might not be running on pipeline cpu) always ensures no
-		 * two task gets same pipeline cpu and thus we never enter hit this
-		 * condition.
-		 *
-		 * Thus if we are here that means prev_cpu of 'p' is definitely a
-		 * pipeline cpu.
-		 */
-		if (walt_pipeline_low_latency_task(cpu_rq(pipeline_cpu)->curr))
-			pipeline_cpu = prev_cpu;
+		if (walt_pipeline_low_latency_task(cpu_rq(pipeline_cpu)->curr)) {
+			/*
+			 * In case if target pipeline cpu is already running a pipeline task
+			 * then scan through all the pipeline cpus and place task on the cpu
+			 * not running any pipeline task(preference is give to prev_cpu if it
+			 * is a pipeline cpu).
+			 */
+			if (cpumask_test_cpu(prev_cpu, &cpus_for_pipeline) &&
+				!walt_pipeline_low_latency_task(cpu_rq(prev_cpu)->curr)) {
+				pipeline_cpu = prev_cpu;
+			} else {
+				int itr_cpu;
+
+				for_each_cpu(itr_cpu, &cpus_for_pipeline) {
+					if (itr_cpu == pipeline_cpu) {
+						continue;
+					} else if (!walt_pipeline_low_latency_task(
+									cpu_rq(itr_cpu)->curr)) {
+						pipeline_cpu = itr_cpu;
+						break;
+					}
+				}
+			}
+		}
 
 		best_energy_cpu = pipeline_cpu;
 		fbt_env.fastpath = PIPELINE_FASTPATH;
