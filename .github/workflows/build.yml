@@ -127,7 +127,7 @@ jobs:
             | SUSFS Support | `${{ (github.event.inputs.variant == 'resukisu' && github.event.inputs.susfs == 'true') && 'Enabled (v2.2.0)' || 'Disabled' }}` | Super User Secret FS |
             | SUSFS Uname Spoofing | `${{ (github.event.inputs.variant == 'resukisu' && github.event.inputs.susfs == 'true' && github.event.inputs.uname_spoof == 'true') && 'Enabled' || 'Disabled' }}` | Kernel Uname Masking |
             | NoMount Support | `${{ (github.event.inputs.variant == 'resukisu' && github.event.inputs.nomount == 'true') && 'Enabled' || 'Disabled' }}` | VFS Path Redirection & Injection |
-            | DroidSpaces Support | `${{ github.event.inputs.droidspaces == 'true' && 'Enabled' || 'Disabled' }}` | Isolated Container Support |
+            | DroidSpaces Support | ${{ github.event.inputs.droidspaces == 'true' && 'Enabled (Latest Upstream Patches)' || 'Disabled' }} | Isolated Container Support |
             | Baseband-guard | Enabled (Latest Upstream) | Anti-Format LSM Partition Guard |
             | Compiler Toolchain | Neutron Clang | LLVM |
 

@@ -269,15 +269,16 @@ if [ "$BUILD_DROIDSPACES" = "y" ]; then
     echo "Fetching and updating to the latest DroidSpaces patches..."
     DROIDSPACES_TMP="$KERNEL_DIR/out/droidspaces"
     if [ -d "$DROIDSPACES_TMP/.git" ]; then
-        (cd "$DROIDSPACES_TMP" && git pull origin main) || true
+        (cd "$DROIDSPACES_TMP" && (git pull origin main 2>/dev/null || git pull origin master 2>/dev/null)) || true
     else
         mkdir -p "$OUT_DIR"
         git clone https://github.com/ravindu644/Droidspaces-OSS.git --depth 1 "$DROIDSPACES_TMP" || true
     fi
 
-    if [ -f "$DROIDSPACES_TMP/Documentation/resources/kernel-patches/GKI/below-kernel-6.12/001.GKI-below-6.12-fix_sysvipc_kabi_6_7_8.patch" ]; then
+    DROIDSPACES_PATCH="$DROIDSPACES_TMP/Documentation/resources/kernel-patches/GKI/below-kernel-6.12/001.GKI-below-6.12-fix_sysvipc_kabi_6_7_8.patch"
+    if [ -f "$DROIDSPACES_PATCH" ]; then
         echo "Applying DroidSpaces GKI patch..."
-        patch -p1 --forward -r - < "$DROIDSPACES_TMP/Documentation/resources/kernel-patches/GKI/below-kernel-6.12/001.GKI-below-6.12-fix_sysvipc_kabi_6_7_8.patch" || true
+        patch -p1 --forward -r - < "$DROIDSPACES_PATCH" || true
     fi
 
     echo "Enabling DroidSpaces in kernel configuration..."
@@ -293,12 +294,18 @@ if [ "$BUILD_DROIDSPACES" = "y" ]; then
     echo "CONFIG_NETFILTER_XT_MATCH_RECENT=y" >> "$OUT_DIR/.config"
     echo "CONFIG_IP_SET=y" >> "$OUT_DIR/.config"
     echo "CONFIG_IP_SET_HASH_IP=y" >> "$OUT_DIR/.config"
+    echo "CONFIG_IP_SET_HASH_NET=y" >> "$OUT_DIR/.config"
+    echo "CONFIG_NETFILTER_XT_SET=y" >> "$OUT_DIR/.config"
+    echo "CONFIG_TMPFS_POSIX_ACL=y" >> "$OUT_DIR/.config"
+    echo "CONFIG_TMPFS_XATTR=y" >> "$OUT_DIR/.config"
 
     make O="$OUT_DIR" CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="-w" olddefconfig || exit 1
 else
     echo "Disabling DroidSpaces in kernel configuration..."
     sed -i '/CONFIG_SYSVIPC/d' "$OUT_DIR/.config"
     echo "CONFIG_SYSVIPC=n" >> "$OUT_DIR/.config"
+    sed -i '/CONFIG_POSIX_MQUEUE/d' "$OUT_DIR/.config"
+    echo "CONFIG_POSIX_MQUEUE=n" >> "$OUT_DIR/.config"
     sed -i '/CONFIG_IPC_NS/d' "$OUT_DIR/.config"
     echo "CONFIG_IPC_NS=n" >> "$OUT_DIR/.config"
     make O="$OUT_DIR" CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="-w" olddefconfig || exit 1
@@ -346,7 +353,7 @@ if [ "$BUILD_RESUKISU" = "y" ]; then
     fi
 fi
 if [ "$BUILD_DROIDSPACES" = "y" ]; then
-    ZIP_SUFFIX="${ZIP_SUFFIX}-droidspaces"
+    ZIP_SUFFIX="${ZIP_SUFFIX}-droidspace"
 fi
 ZIP_NAME="Capybara-Revived${ZIP_SUFFIX}-$TIME.zip"
 cd "$TEMP_ANY_KERNEL_DIR"
